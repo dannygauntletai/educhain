@@ -1,6 +1,6 @@
 # educhain/engines/qna_engine.py
 
-from typing import Optional, Type, Any, List, Literal, Union, Tuple
+from typing import Optional, Type, Any, List, Literal, Union, Tuple, Dict
 from pydantic import BaseModel
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.prompts import PromptTemplate
@@ -36,6 +36,8 @@ from IPython.display import display, HTML
 import random
 from langchain_ollama import OllamaLLM
 import logging
+import firecrawl
+from dotenv import load_dotenv
 
 # Set up module logger
 logger = logging.getLogger(__name__)
@@ -104,6 +106,7 @@ class QnAEngine:
         self.pdf_loader = PdfFileLoader()
         self.url_loader = UrlLoader()
         self.embeddings = None
+        self.firecrawl_client = None
 
     def _check_ollama_connection(self, base_url: str) -> bool:
         """Check if Ollama server is running and accessible.
@@ -373,6 +376,55 @@ class QnAEngine:
             return None
 
 
+    def _initialize_firecrawl(self):
+        """Initialize Firecrawl client if not already initialized"""
+        if self.firecrawl_client is None:
+            # Get API key from environment
+            load_dotenv()
+            api_key = os.getenv('FIRECRAWL_API_KEY')
+            if not api_key:
+                logger.warning("FIRECRAWL_API_KEY not found in environment variables")
+                return
+            
+            self.firecrawl_client = firecrawl.Client(api_key=api_key)
+
+    def _get_web_context(self, topic: str, max_results: int = 3) -> str:
+        """Get relevant web content for a topic using Firecrawl.
+        
+        Args:
+            topic: The topic to search for
+            max_results: Maximum number of pages to crawl
+            
+        Returns:
+            str: Combined markdown content from relevant sources
+        """
+        try:
+            self._initialize_firecrawl()
+            if not self.firecrawl_client:
+                return ""
+            
+            # Use the scrape endpoint instead of crawl for single page
+            search_results = self.firecrawl_client.scrape(
+                url=f"https://www.google.com/search?q={topic.replace(' ', '+')}",
+                options={
+                    "onlyMainContent": True,
+                    "excludeTags": ["nav", "footer", "header", "aside"]
+                }
+            )
+
+            if not search_results or not search_results.get('success'):
+                return ""
+
+            # Get markdown content
+            if 'data' in search_results and 'markdown' in search_results['data']:
+                return search_results['data']['markdown']
+            
+            return ""
+
+        except Exception as e:
+            logger.warning(f"Error fetching web content: {str(e)}")
+            return ""
+
     def generate_questions(
         self,
         topic: str,
@@ -382,9 +434,33 @@ class QnAEngine:
         custom_instructions: Optional[str] = None,
         response_model: Optional[Type[Any]] = None,
         output_format: Optional[OutputFormatType] = None,
+        web_search: bool = False,
+        max_web_results: int = 3,
         **kwargs
     ) -> Any:
         try:
+            # If web_search is enabled, get additional context from web
+            if web_search:
+                web_context = self._get_web_context(topic, max_web_results)
+                
+                if web_context:
+                    # Add web content to topic context
+                    topic = f"{topic}\n\nAdditional Context from Web Sources:\n{web_context}"
+                    
+                    if custom_instructions:
+                        custom_instructions += (
+                            "\nIncorporate relevant and accurate information from the "
+                            "provided web sources. Ensure the questions reflect current "
+                            "and factual information."
+                        )
+                    else:
+                        custom_instructions = (
+                            "Incorporate relevant and accurate information from the "
+                            "provided web sources. Ensure the questions reflect current "
+                            "and factual information."
+                        )
+
+            # Continue with existing question generation logic
             parser, model = self._get_parser_and_model(question_type, response_model)
             format_instructions = parser.get_format_instructions()
             template = self._get_prompt_template(question_type, prompt_template)

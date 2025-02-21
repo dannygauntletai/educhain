@@ -223,6 +223,142 @@ class TestSourceBasedQuestionGeneration:
             assert questions is not None
             assert len(questions.questions) == 2
 
+    def test_web_search_integration(self, engine):
+        """Test generating questions with web search enabled"""
+        mock_web_content = """
+        Quantum computing is a type of computation that harnesses the power of quantum 
+        mechanics. Unlike classical computers that use bits, quantum computers use 
+        quantum bits or qubits. This allows them to perform certain calculations 
+        exponentially faster than classical computers.
+        """
+        
+        mock_firecrawl_response = {
+            "success": True,
+            "data": {
+                "markdown": mock_web_content
+            }
+        }
+        
+        # Create a mock client with the scrape method
+        mock_client = MagicMock()
+        mock_client.scrape.return_value = mock_firecrawl_response
+        
+        # Patch the client creation instead of the initialization
+        with patch.object(engine, 'firecrawl_client', mock_client), \
+             patch('langchain_ollama.OllamaLLM.predict') as mock_predict:
+            
+            mock_predict.return_value = """
+            {
+                "questions": [
+                    {
+                        "question": "What is the fundamental unit of quantum computing?",
+                        "answer": "Qubits",
+                        "explanation": "Quantum computers use quantum bits or qubits instead of classical bits",
+                        "options": ["Bits", "Qubits", "Bytes", "Neurons"]
+                    }
+                ]
+            }
+            """
+            
+            questions = engine.generate_questions(
+                topic="Quantum Computing",
+                num=1,
+                web_search=True
+            )
+            
+            assert questions is not None
+            assert len(questions.questions) == 1
+            # Check that web content was incorporated into either question or explanation
+            assert any(
+                "qubit" in q.question.lower() or 
+                "qubit" in q.explanation.lower() or
+                "qubit" in q.answer.lower()
+                for q in questions.questions
+            )
+
+    def test_web_search_error_handling(self, engine):
+        """Test handling of web search errors"""
+        with patch.object(engine, '_get_web_context', return_value=""), \
+             patch('langchain_ollama.OllamaLLM.predict') as mock_predict:
+            
+            mock_predict.return_value = """
+            {
+                "questions": [
+                    {
+                        "question": "Basic question without web content?",
+                        "answer": "Basic answer",
+                        "explanation": "Basic explanation",
+                        "options": ["Option A", "Option B", "Option C", "Option D"]
+                    }
+                ]
+            }
+            """
+            
+            # Should still generate questions even if web search fails
+            questions = engine.generate_questions(
+                topic="Any Topic",
+                num=1,
+                web_search=True
+            )
+            
+            assert questions is not None
+            assert len(questions.questions) == 1
+
+    def test_web_context_extraction(self, engine):
+        """Test the web context extraction functionality"""
+        mock_firecrawl_response = {
+            "success": True,
+            "data": {
+                "markdown": "First source content\n\nSecond source content\n\nThird source content"
+            }
+        }
+        
+        # Create a mock client with the scrape method
+        mock_client = MagicMock()
+        mock_client.scrape.return_value = mock_firecrawl_response
+        
+        # Patch the client directly
+        with patch.object(engine, 'firecrawl_client', mock_client):
+            context = engine._get_web_context("test topic", max_results=3)
+            
+            assert context is not None
+            assert "First source content" in context
+            assert "Second source content" in context
+            assert "Third source content" in context
+
+    def test_web_search_custom_instructions(self, engine):
+        """Test that web search properly modifies custom instructions"""
+        mock_web_content = "Sample web content"
+        
+        with patch.object(engine, '_get_web_context', return_value=mock_web_content), \
+             patch('langchain_ollama.OllamaLLM.predict') as mock_predict:
+            
+            mock_predict.return_value = """
+            {
+                "questions": [
+                    {
+                        "question": "Test question?",
+                        "answer": "Test answer",
+                        "explanation": "Test explanation",
+                        "options": ["A", "B", "C", "D"]
+                    }
+                ]
+            }
+            """
+            
+            # Test with existing custom instructions
+            questions = engine.generate_questions(
+                topic="Test Topic",
+                num=1,
+                web_search=True,
+                custom_instructions="Original instructions"
+            )
+            
+            # Verify custom instructions were properly modified
+            assert "Original instructions" in mock_predict.call_args[0][0]
+            assert "web sources" in mock_predict.call_args[0][0].lower()
+            assert "current" in mock_predict.call_args[0][0].lower()
+
 
 class TestYouTubeQuestionGeneration:
     @pytest.fixture

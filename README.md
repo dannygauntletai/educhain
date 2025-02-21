@@ -263,6 +263,63 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 Made with ❤️ by Buildfastwithai
 
 [www.educhain.in](https://educhain.in)
+
+# [NEW] Web Search Integration
+
+The QnA Engine now supports web search capabilities through Firecrawl integration. This allows generating questions that incorporate current information from web sources.
+
+## Setup
+
+1. Get a Firecrawl API key from [Firecrawl](https://firecrawl.dev)
+2. Add your API key to `.env`:
+```
+FIRECRAWL_API_KEY=your_api_key_here
+```
+
+## Usage
+
+Enable web search when generating questions:
+
+```python
+from educhain import Educhain
+
+client = Educhain()
+
+# Generate questions with web search
+questions = client.qna_engine.generate_questions(
+    topic="Latest developments in quantum computing",
+    num=3,
+    web_search=True,  # Enable web search
+    max_web_results=3  # Optional: limit number of web results
+)
+```
+
+The web search will:
+- Search for relevant content about the topic
+- Filter out non-content elements (navigation, footers, etc.)
+- Incorporate current information into generated questions
+- Fall back gracefully if web search fails
+
+## Configuration
+
+Web search options can be configured through parameters:
+
+- `web_search`: Enable/disable web search (default: False)
+- `max_web_results`: Maximum number of web results to use (default: 3)
+- `custom_instructions`: Add specific instructions for using web content
+
+## Example
+
+```python
+questions = client.qna_engine.generate_questions(
+    topic="Artificial Intelligence trends",
+    num=2,
+    web_search=True,
+    custom_instructions="Focus on developments from the past year"
+)
+```
+
+This will generate questions that incorporate current information from web sources about AI trends.
 ```
 
 You can now copy and paste this directly into your project!

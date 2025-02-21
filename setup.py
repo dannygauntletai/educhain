@@ -25,7 +25,7 @@ setup(
         "pandas==2.2.3",
         "ipython==8.32.0",
         "matplotlib==3.8.0",
-       
+        "firecrawl-py>=1.0.0",
     ],
     extras_require={
         "dev": [
